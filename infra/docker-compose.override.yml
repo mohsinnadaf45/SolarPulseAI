@@ -1,0 +1,26 @@
+services:
+  # Development override for hot-reloading FastAPI
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../backend:/app
+      - /app/__pycache__
+    environment:
+      DEBUG: "true"
+      LOG_LEVEL: "DEBUG"
+
+  # Development override for Next.js hot-module reloading
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    command: npm run dev
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: "development"

@@ -7,19 +7,54 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setMessage(null);
+    setError(null);
 
-    // Prototype UI — wire to FastAPI POST /auth/token when the API is available.
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    setMessage(
-      "Login is ready on the frontend. Connect NEXT_PUBLIC_API_URL to the FastAPI auth endpoint to complete sign-in.",
-    );
-    setPending(false);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const params = new URLSearchParams();
+      params.append("username", email.trim());
+      params.append("password", password);
+
+      const res = await fetch(`${apiUrl}/api/v1/auth/token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        setError(errorData?.detail || "Invalid email or password.");
+        setPending(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (typeof window !== "undefined") {
+        localStorage.setItem("solarpulse_access_token", data.access_token);
+        localStorage.setItem("solarpulse_refresh_token", data.refresh_token);
+        localStorage.setItem("solarpulse_user", email.trim());
+      }
+
+      setMessage("Login successful! Redirecting…");
+      setTimeout(() => {
+        window.location.href = "/dashboard";
+      }, 1000);
+    } catch {
+      setError(
+        "Could not connect to the backend server. Please verify FastAPI is running on http://localhost:8000.",
+      );
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -58,6 +93,12 @@ export function LoginForm() {
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
+
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-[color:var(--danger)]">
+            {error}
+          </p>
+        ) : null}
 
         {message ? (
           <p

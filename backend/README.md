@@ -68,6 +68,15 @@ backend/
 
 ### 1. Create and activate a virtual environment
 
+Use **Python 3.11 or 3.12** if you can (simplest install). If you only have **Python 3.14**, install from the updated `requirements.txt` so pip pulls packages with prebuilt wheels—do not pin old versions of `scikit-learn` (1.5.x) or `pydantic` (2.9.x), or Windows will try to compile them and fail.
+
+For **training only** on 3.14:
+
+```bash
+pip install -r requirements-ml.txt
+python -m ml.training.train --plant-id P01 --dry-run
+```
+
 ```bash
 # Create
 python -m venv .venv

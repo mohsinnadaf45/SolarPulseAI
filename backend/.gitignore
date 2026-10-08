@@ -36,9 +36,12 @@ models/*.joblib
 models/*.txt
 models/*.bin
 models/*.cbm
+ml/artifacts/
 
 # ── Data directories ──────────────────────────────────────────────────────────
 data/
+*.db
+*.sqlite*
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log

@@ -34,9 +34,21 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.forecast import ForecastRecord
 from app.models.scada import ScadaReading
-from app.schemas.forecast import ForecastResponse, ForecastSummary
+from app.schemas.forecast import (
+    ForecastResponse,
+    ForecastSummary,
+    ProbabilisticForecastResponse,
+    ProbabilisticForecastPoint,
+    RampRiskSummarySchema,
+)
 from app.services.clipping_service import calculate_clipping
 from app.services.soiling_service import calculate_soiling_loss
+from app.services import weather_service
+
+try:
+    from backend.ml.postprocessing.ramp_risk import compute_ramp_risk_profile
+except ImportError:
+    from ml.postprocessing.ramp_risk import compute_ramp_risk_profile
 
 logger = get_logger(__name__)
 
@@ -94,24 +106,45 @@ def _calculate_physics_power(
     """
     Estimate physics-based power output.
 
-    Uses pvlib if available; otherwise falls back to a simple irradiance model.
+    Uses pvlib clearsky if available, otherwise falls back to astronomical
+    solar elevation model. Accurately yields 0.0 during nighttime.
     """
-    if PVLIB_AVAILABLE and irradiance_w_m2 is None:
-        try:
-            location = pvlib.location.Location(
-                latitude=latitude,
-                longitude=longitude,
-                tz="UTC",
-            )
-            times = pd.DatetimeIndex([forecast_time.astimezone(timezone.utc)])
-            solar_pos = location.get_solarposition(times)
-            clearsky = location.get_clearsky(times)
-            irradiance_w_m2 = float(clearsky["ghi"].iloc[0])
-        except Exception as exc:
-            logger.debug(f"pvlib clearsky failed: {exc}")
-            irradiance_w_m2 = 600.0  # fallback average
+    if irradiance_w_m2 is None:
+        if PVLIB_AVAILABLE:
+            try:
+                location = pvlib.location.Location(
+                    latitude=latitude,
+                    longitude=longitude,
+                    tz="UTC",
+                )
+                times = pd.DatetimeIndex([forecast_time.astimezone(timezone.utc)])
+                clearsky = location.get_clearsky(times)
+                irradiance_w_m2 = max(0.0, float(clearsky["ghi"].iloc[0]))
+            except Exception as exc:
+                logger.debug(f"pvlib clearsky failed: {exc}")
+                irradiance_w_m2 = None
 
-    irradiance_w_m2 = irradiance_w_m2 or 600.0
+        if irradiance_w_m2 is None:
+            # Fallback astronomical solar elevation calculation
+            utc_time = forecast_time.astimezone(timezone.utc)
+            doy = utc_time.timetuple().tm_yday
+            hour_utc = utc_time.hour + utc_time.minute / 60.0
+            solar_time_h = (hour_utc + longitude / 15.0) % 24.0
+            declination_rad = np.radians(23.45 * np.sin(np.radians((360 / 365) * (doy - 81))))
+            lat_rad = np.radians(latitude)
+            hour_angle_rad = np.radians(15.0 * (solar_time_h - 12.0))
+            sin_elevation = (
+                np.sin(lat_rad) * np.sin(declination_rad)
+                + np.cos(lat_rad) * np.cos(declination_rad) * np.cos(hour_angle_rad)
+            )
+            if sin_elevation <= 0.0:
+                irradiance_w_m2 = 0.0
+            else:
+                irradiance_w_m2 = float(980.0 * (sin_elevation ** 1.15))
+
+    if irradiance_w_m2 <= 1.0:
+        return 0.0
+
     temperature_c = temperature_c or 25.0
 
     # Simple temperature derating: -0.4% per degree above 25°C
@@ -199,8 +232,30 @@ async def generate_forecast(
     )
     latest_scada: Optional[ScadaReading] = result.scalar_one_or_none()
 
-    irradiance = latest_scada.irradiance_w_m2 if latest_scada else None
-    temperature = latest_scada.temperature_c if latest_scada else None
+    # ── Weather data (WeatherAPI.com or mock fallback) ────────────────────────
+    weather: Optional[weather_service.WeatherPoint] = None
+    try:
+        wd = await weather_service.get_current_weather(plant.latitude, plant.longitude)
+        weather = wd.current
+        logger.debug(
+            f"Weather for plant {plant.id}: "
+            f"temp={weather.temperature_c}°C irr={weather.irradiance_w_m2:.0f} W/m² "
+            f"source={wd.source}"
+        )
+    except Exception as exc:
+        logger.warning(f"Could not fetch weather for plant {plant.id}: {exc}")
+
+    # Prefer live weather over SCADA reading for irradiance/temperature
+    irradiance = (
+        weather.irradiance_w_m2
+        if weather is not None
+        else (latest_scada.irradiance_w_m2 if latest_scada else None)
+    )
+    temperature = (
+        weather.temperature_c
+        if weather is not None
+        else (latest_scada.temperature_c if latest_scada else None)
+    )
 
     # ── Physics layer ─────────────────────────────────────────────────────
     physics_kw = _calculate_physics_power(
@@ -331,4 +386,162 @@ async def get_forecast_summary(
         mean_absolute_error_kw=round(mae, 4) if mae is not None else None,
         record_count=len(records),
         model_name=model_name,
+    )
+
+
+async def generate_probabilistic_forecast(
+    db: AsyncSession,
+    plant,
+    config,
+    horizon_minutes: int = 240,
+    interval_minutes: int = 15,
+) -> ProbabilisticForecastResponse:
+    """
+    Generates a full probabilistic forecast time-series (P10, P50, P90)
+    across the requested horizon, evaluates ramp rates and cloud-passage volatility,
+    and computes actionable BESS reserve recommendations.
+    """
+    now = datetime.now(tz=timezone.utc)
+    # Align to next round interval boundary
+    start_time = now.replace(second=0, microsecond=0)
+    remainder = start_time.minute % interval_minutes
+    if remainder != 0:
+        start_time = start_time + timedelta(minutes=(interval_minutes - remainder))
+
+    step_count = max(2, int(horizon_minutes / interval_minutes) + 1)
+    timestamps = [start_time + timedelta(minutes=i * interval_minutes) for i in range(step_count)]
+
+    # Fetch latest SCADA for baseline operational context
+    result = await db.execute(
+        select(ScadaReading)
+        .where(ScadaReading.plant_id == plant.id)
+        .order_by(ScadaReading.timestamp.desc())
+        .limit(1)
+    )
+    latest_scada: Optional[ScadaReading] = result.scalar_one_or_none()
+    current_temp = latest_scada.temperature_c if latest_scada else 25.0
+    current_irradiance = latest_scada.irradiance_w_m2 if latest_scada else 600.0
+
+    model_name = "probabilistic_quantile"
+
+    p10_list: List[float] = []
+    p50_list: List[float] = []
+    p90_list: List[float] = []
+    cloud_list: List[float] = []
+
+    for t in timestamps:
+        # Physics-based baseline power using pvlib or astronomical model
+        physics_kw = _calculate_physics_power(
+            latitude=plant.latitude,
+            longitude=plant.longitude,
+            tilt=config.tilt,
+            azimuth=config.azimuth,
+            capacity_kw=plant.capacity_kw,
+            efficiency=config.efficiency,
+            forecast_time=t,
+            irradiance_w_m2=None,
+            temperature_c=current_temp,
+        )
+
+        # Operational deratings: soiling and inverter AC clipping
+        soiling = calculate_soiling_loss(
+            current_power_kw=physics_kw,
+            days_since_cleaning=7.0,
+            irradiance_w_m2=current_irradiance,
+        )
+        soiling_adj = max(0.0, physics_kw - soiling.estimated_loss_kw)
+        clipping = calculate_clipping(
+            dc_power_kw=soiling_adj,
+            inverter_capacity_kw=plant.inverter_capacity_kw,
+            efficiency=config.efficiency,
+        )
+        base_power = clipping.clipped_ac_power_kw
+
+        if base_power <= 0.5:
+            # Nighttime or sun below horizon
+            p10 = 0.0
+            p50 = 0.0
+            p90 = 0.0
+            cloud_pct = 0.0
+        else:
+            # Cloud passage wave simulation across forecast horizon
+            time_offset_min = (t - start_time).total_seconds() / 60.0
+            cloud_passage_wave = 0.25 * np.sin(2 * np.pi * time_offset_min / 80.0) + 0.15 * np.cos(2 * np.pi * time_offset_min / 35.0)
+            cloud_factor = float(np.clip(0.20 + cloud_passage_wave, 0.05, 0.85))
+            cloud_pct = cloud_factor * 100.0
+
+            # P50: median forecast attenuated by cloud layer
+            p50_raw = base_power * (1.0 - 0.55 * cloud_factor)
+            p50 = float(np.clip(p50_raw, 0.0, plant.inverter_capacity_kw))
+
+            # P10: 10th percentile conservative lower bound (thick cloud passage event)
+            p10_raw = p50 * (1.0 - 0.40 * np.sqrt(cloud_factor))
+            p10 = float(np.clip(p10_raw, 0.0, p50))
+
+            # P90: 90th percentile optimistic upper bound (clear gap / beam enhancement)
+            p90_raw = min(base_power, p50 * (1.0 + 0.35 * (1.0 - cloud_factor)))
+            p90 = float(np.clip(p90_raw, p50, plant.inverter_capacity_kw))
+
+        p10_list.append(round(p10, 2))
+        p50_list.append(round(p50, 2))
+        p90_list.append(round(p90, 2))
+        cloud_list.append(round(cloud_pct, 1))
+
+    df_points = pd.DataFrame({
+        "forecast_time": [t.isoformat() for t in timestamps],
+        "p10": p10_list,
+        "p50": p50_list,
+        "p90": p90_list,
+        "cloud_cover": cloud_list,
+    })
+
+    point_metrics, risk_summary = compute_ramp_risk_profile(
+        df=df_points,
+        capacity_kw=plant.capacity_kw,
+        interval_minutes=float(interval_minutes),
+    )
+
+    schema_points: List[ProbabilisticForecastPoint] = []
+    for idx, pm in enumerate(point_metrics):
+        schema_points.append(
+            ProbabilisticForecastPoint(
+                forecast_time=timestamps[idx],
+                p10_kw=pm.p10_kw,
+                p50_kw=pm.p50_kw,
+                p90_kw=pm.p90_kw,
+                uncertainty_band_kw=pm.uncertainty_band_kw,
+                relative_uncertainty_pct=pm.relative_uncertainty_pct,
+                ramp_rate_kw_per_min=pm.ramp_rate_kw_per_min,
+                ramp_rate_pct_per_min=pm.ramp_rate_pct_per_min,
+                ramp_direction=pm.ramp_direction.value,
+                ramp_risk_level=pm.ramp_risk_level.value,
+                cloud_impact_factor=pm.cloud_impact_factor,
+                bess_reserve_recommendation_kw=pm.bess_reserve_recommendation_kw,
+                reserve_action=pm.reserve_action,
+            )
+        )
+
+    summary_schema = RampRiskSummarySchema(
+        max_ramp_rate_kw_per_min=risk_summary.max_ramp_rate_kw_per_min,
+        max_ramp_down_kw_per_min=risk_summary.max_ramp_down_kw_per_min,
+        max_ramp_up_kw_per_min=risk_summary.max_ramp_up_kw_per_min,
+        ramp_risk_score=risk_summary.ramp_risk_score,
+        highest_risk_level=risk_summary.highest_risk_level.value,
+        high_risk_event_count=risk_summary.high_risk_event_count,
+        critical_risk_event_count=risk_summary.critical_risk_event_count,
+        avg_uncertainty_band_kw=risk_summary.avg_uncertainty_band_kw,
+        recommended_bess_capacity_kw=risk_summary.recommended_bess_capacity_kw,
+        primary_action_advisory=risk_summary.primary_action_advisory,
+    )
+
+    return ProbabilisticForecastResponse(
+        plant_id=plant.id,
+        plant_name=plant.name,
+        capacity_kw=plant.capacity_kw,
+        generated_at=now,
+        horizon_minutes=horizon_minutes,
+        interval_minutes=interval_minutes,
+        model_name=model_name,
+        points=schema_points,
+        summary=summary_schema,
     )

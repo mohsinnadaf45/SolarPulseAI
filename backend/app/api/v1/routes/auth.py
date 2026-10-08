@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -43,7 +43,9 @@ async def login(
     Returns `access_token`, `refresh_token`, and `token_type`.
     """
     result = await db.execute(
-        select(User).where(User.username == form_data.username)
+        select(User).where(
+            or_(User.username == form_data.username, User.email == form_data.username)
+        )
     )
     user: User | None = result.scalar_one_or_none()
 

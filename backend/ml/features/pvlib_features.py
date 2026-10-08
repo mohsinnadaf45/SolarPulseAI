@@ -169,6 +169,7 @@ def compute_pvlib_features(df: pd.DataFrame, plant: PlantConfig) -> pd.DataFrame
             dhi = erbs_decomp["dhi"].fillna(0.0).clip(lower=0.0)
 
         # 4. Plane-of-Array (POA) Irradiance
+        dni_extra = irradiance.get_extra_radiation(times)
         poa = irradiance.get_total_irradiance(
             surface_tilt=plant.tilt_deg,
             surface_azimuth=plant.azimuth_deg,
@@ -177,6 +178,8 @@ def compute_pvlib_features(df: pd.DataFrame, plant: PlantConfig) -> pd.DataFrame
             dni=dni,
             ghi=ghi,
             dhi=dhi,
+            dni_extra=dni_extra,
+            airmass=airmass_relative,
             model="haydavies"
         )
         poa_global = poa["poa_global"].fillna(0.0).clip(lower=0.0)

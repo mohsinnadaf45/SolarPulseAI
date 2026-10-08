@@ -24,10 +24,12 @@ from app.api.v1.routes import (
     anomaly,
     auth,
     curtailment,
+    diagnosis,
     forecast,
     health,
     maintenance,
     plants,
+    weather,
 )
 from app.api.websockets.scada_ws import scada_ws_handler
 from app.core.config import settings
@@ -45,9 +47,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown logic."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
 
-    # Tables are created explicitly via init_db() or Alembic — not on every startup.
-    # To initialise for the first time, call:  python -m app.scripts.create_tables
-    logger.info("Database tables are managed via init_db() or Alembic migrations.")
+    # Ensure database tables exist and seed demo plants if empty
+    try:
+        from app.core.database import init_db
+        await init_db()
+        logger.info("Database tables initialized successfully.")
+
+        from app.scripts.seed_data import seed
+        await seed()
+        logger.info("Demo plants and operational data verified/seeded.")
+    except Exception as exc:
+        logger.warning(f"Could not automatically initialize/seed database: {exc}")
 
     yield
 
@@ -64,7 +74,8 @@ def create_application() -> FastAPI:
         description=(
             "Solar Power Plant Forecasting and Monitoring API. "
             "Provides real-time SCADA data, physics-informed and ML forecasting, "
-            "predictive maintenance, AI plant health scoring, and grid curtailment optimization."
+            "automated inverter diagnosis, predictive maintenance, AI plant health scoring, "
+            "and grid curtailment optimization."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -76,6 +87,7 @@ def create_application() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
+        allow_origin_regex=r"https://.*\.vercel\.app",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -88,6 +100,8 @@ def create_application() -> FastAPI:
     app.include_router(forecast.router, prefix=api_prefix)
     app.include_router(anomaly.router, prefix=api_prefix)
     app.include_router(alerts.router, prefix=api_prefix)
+    app.include_router(diagnosis.router, prefix=api_prefix)
+    app.include_router(weather.router, prefix=api_prefix)
     app.include_router(maintenance.router, prefix=api_prefix)
     app.include_router(health.router, prefix=api_prefix)
     app.include_router(curtailment.router, prefix=api_prefix)

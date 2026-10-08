@@ -153,7 +153,7 @@ Create a `.env` file at the project root (see `.env.example`):
 
 ```env
 # --- Database ---
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/solarpulse
+DATABASE_URL=postgresql+asyncpg://solarpulse:solarpulse_secret@localhost:5432/solarpulse
 
 # --- Auth ---
 JWT_SECRET_KEY=your-super-secret-key
@@ -322,10 +322,10 @@ Model artefacts are versioned under `backend/ml/artifacts/models/` and served vi
 - [x] Core hybrid forecasting engine (pvlib + LightGBM)
 - [x] Inverter clipping & dynamic soiling estimation
 - [x] Forecast-vs-actual anomaly detection with configurable thresholds
-- [ ] Probabilistic P10/P50/P90 forecasting & ramp-risk indicators
+- [x] Probabilistic P10/P50/P90 forecasting & ramp-risk indicators
 - [ ] Co-located BESS charge/discharge optimization
 - [ ] Multi-model ensemble (XGBoost + LightGBM + DeepAR)
-- [ ] Automated root-cause diagnosis from inverter error codes
+- [x] Automated root-cause diagnosis from inverter error codes
 - [ ] Market-aware BESS dispatch with real-time grid pricing
 - [ ] Multi-site fleet management console
 

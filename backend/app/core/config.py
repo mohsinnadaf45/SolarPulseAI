@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     NWP_API_URL: str = ""
     NWP_API_KEY: str = ""
 
+    # ── WeatherAPI.com ────────────────────────────────────────────────────────
+    # Sign up free at https://www.weatherapi.com/ to get a key.
+    # Leave empty to use built-in mock data (no external calls).
+    WEATHER_API_KEY: str = ""
+    WEATHER_API_BASE_URL: str = "https://api.weatherapi.com/v1"
+
     # ── Predictive Maintenance Configuration (Enhancement 4) ───────────────────
     MAINTENANCE_THERMAL_WEIGHT: float = 0.25
     MAINTENANCE_EFFICIENCY_WEIGHT: float = 0.25
@@ -76,6 +82,16 @@ class Settings(BaseSettings):
     CURTAILMENT_DEFAULT_EXPORT_LIMIT_RATIO: float = 0.85
     CURTAILMENT_RISK_MEDIUM_THRESHOLD_PCT: float = 5.0
     CURTAILMENT_RISK_HIGH_THRESHOLD_PCT: float = 20.0
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_async_db_url(cls, v: str) -> str:
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                return v.replace("postgres://", "postgresql+asyncpg://", 1)
+            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     @field_validator("JWT_SECRET_KEY")
     @classmethod

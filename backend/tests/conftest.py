@@ -8,10 +8,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Ensure repository root is on sys.path
+# Ensure repository root and backend directory are on sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+for path in [str(REPO_ROOT), str(BACKEND_DIR)]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from backend.ml.config import PlantConfig
 

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user, get_db
 from app.models.user import User
-from app.schemas.forecast import ForecastResponse, ForecastSummary
+from app.schemas.forecast import ForecastResponse, ForecastSummary, ProbabilisticForecastResponse
 from app.services import forecast_service, plant_service
 
 router = APIRouter(prefix="/forecast", tags=["Forecast"])
@@ -76,3 +76,22 @@ async def generate_forecast(
         db, plant=plant, config=config, horizon_minutes=horizon_minutes
     )
     return record  # type: ignore[return-value]
+
+
+@router.get(
+    "/{plant_id}/probabilistic",
+    response_model=ProbabilisticForecastResponse,
+    summary="Get probabilistic forecast with P10/P50/P90 bands and ramp/cloud-passage risk metrics",
+)
+async def get_probabilistic_forecast(
+    plant_id: int,
+    horizon_minutes: int = Query(default=240, ge=15, le=1440, description="Forecast horizon in minutes"),
+    interval_minutes: int = Query(default=15, ge=5, le=60, description="Interval resolution in minutes"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_active_user),
+) -> ProbabilisticForecastResponse:
+    plant = await plant_service.get_plant(db, plant_id)
+    config = await plant_service.get_plant_config(db, plant_id)
+    return await forecast_service.generate_probabilistic_forecast(
+        db, plant=plant, config=config, horizon_minutes=horizon_minutes, interval_minutes=interval_minutes
+    )

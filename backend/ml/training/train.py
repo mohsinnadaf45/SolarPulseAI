@@ -11,7 +11,7 @@ import logging
 import os
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -154,7 +154,7 @@ def train_pipeline(
     artifact_path = output_dir / versioned_filename
     final_model.metadata["cv_reports"] = fold_reports
     final_model.metadata["test_report"] = test_report
-    final_model.metadata["trained_at"] = datetime.utcnow().isoformat()
+    final_model.metadata["trained_at"] = datetime.now(timezone.utc).isoformat()
     final_model.save(artifact_path)
     logger.info("Serialized model artifact saved to: %s", artifact_path)
 

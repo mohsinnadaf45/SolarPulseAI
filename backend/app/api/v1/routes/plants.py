@@ -48,6 +48,17 @@ async def create_plant(
     return plant  # type: ignore[return-value]
 
 
+@router.post(
+    "/seed",
+    summary="Seed demo solar plants, forecasts, and telemetry",
+)
+async def seed_demo_plants() -> dict:
+    """Convenience endpoint to populate database with demo plants and historical telemetry."""
+    from app.scripts.seed_data import seed
+    await seed()
+    return {"message": "Demo solar plants and operational data successfully seeded."}
+
+
 @router.get(
     "",
     response_model=List[PlantResponse],

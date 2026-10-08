@@ -10,7 +10,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from jose import JWTError, jwt
+try:
+    from jose import JWTError, jwt
+except ImportError:
+    import jwt  # type: ignore
+    from jwt.exceptions import PyJWTError as JWTError  # type: ignore
 import bcrypt
 
 from app.core.config import settings

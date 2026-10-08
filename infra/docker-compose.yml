@@ -1,0 +1,117 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. TimescaleDB (PostgreSQL 15 + Time-Series Engine)
+  # ---------------------------------------------------------------------------
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: solarpulse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-solarpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-solarpulse_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-solarpulse}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./postgres/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solarpulse} -d ${POSTGRES_DB:-solarpulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - solarpulse-net
+
+  # ---------------------------------------------------------------------------
+  # 2. Redis Cache & Job Queue Broker
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: solarpulse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - solarpulse-net
+
+  # ---------------------------------------------------------------------------
+  # 3. FastAPI Backend (REST API, WebSockets, ML Inference)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: solarpulse-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-solarpulse}:${POSTGRES_PASSWORD:-solarpulse_secret}@db:5432/${POSTGRES_DB:-solarpulse}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    networks:
+      - solarpulse-net
+
+  # ---------------------------------------------------------------------------
+  # 4. Next.js Frontend Dashboard
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: solarpulse-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    networks:
+      - solarpulse-net
+
+  # ---------------------------------------------------------------------------
+  # 5. Nginx Reverse Proxy Gateway
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: solarpulse-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - solarpulse-net
+
+volumes:
+  timescaledb_data:
+    name: solarpulse_timescaledb_data
+  redis_data:
+    name: solarpulse_redis_data
+
+networks:
+  solarpulse-net:
+    name: solarpulse-network
+    driver: bridge

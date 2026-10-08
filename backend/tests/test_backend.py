@@ -9,9 +9,15 @@ Unit and integration tests for Solar Forecast API:
 - Schema validations
 """
 
+import sys
+from pathlib import Path
 from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from app.main import app
 from app.core.security import hash_password, verify_password, create_access_token, decode_access_token

@@ -11,6 +11,15 @@ from backend.ml.postprocessing.soiling import (
     apply_soiling_loss,
     calculate_soiling_metrics,
 )
+from backend.ml.postprocessing.ramp_risk import (
+    RampDirection,
+    RampRiskLevel,
+    RampPointMetrics,
+    RampRiskSummary,
+    classify_ramp_risk,
+    calculate_bess_reserve_recommendation,
+    compute_ramp_risk_profile,
+)
 
 __all__ = [
     "apply_clipping",
@@ -18,4 +27,11 @@ __all__ = [
     "calculate_dynamic_soiling",
     "apply_soiling_loss",
     "calculate_soiling_metrics",
+    "RampDirection",
+    "RampRiskLevel",
+    "RampPointMetrics",
+    "RampRiskSummary",
+    "classify_ramp_risk",
+    "calculate_bess_reserve_recommendation",
+    "compute_ramp_risk_profile",
 ]
