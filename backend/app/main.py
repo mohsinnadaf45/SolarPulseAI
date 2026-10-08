@@ -19,7 +19,16 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.routes import auth, plants, forecast, anomaly, alerts
+from app.api.v1.routes import (
+    alerts,
+    anomaly,
+    auth,
+    curtailment,
+    forecast,
+    health,
+    maintenance,
+    plants,
+)
 from app.api.websockets.scada_ws import scada_ws_handler
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
@@ -54,8 +63,8 @@ def create_application() -> FastAPI:
         version=settings.APP_VERSION,
         description=(
             "Solar Power Plant Forecasting and Monitoring API. "
-            "Provides real-time SCADA data, physics-based and ML forecasting, "
-            "anomaly detection, and plant management."
+            "Provides real-time SCADA data, physics-informed and ML forecasting, "
+            "predictive maintenance, AI plant health scoring, and grid curtailment optimization."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -79,6 +88,9 @@ def create_application() -> FastAPI:
     app.include_router(forecast.router, prefix=api_prefix)
     app.include_router(anomaly.router, prefix=api_prefix)
     app.include_router(alerts.router, prefix=api_prefix)
+    app.include_router(maintenance.router, prefix=api_prefix)
+    app.include_router(health.router, prefix=api_prefix)
+    app.include_router(curtailment.router, prefix=api_prefix)
 
     # ── WebSocket ─────────────────────────────────────────────────────────────
     @app.websocket("/ws/scada/{plant_id}")
@@ -88,7 +100,7 @@ def create_application() -> FastAPI:
 
     # ── Health endpoint ───────────────────────────────────────────────────────
     @app.get("/health", tags=["Health"], summary="Health check")
-    async def health() -> dict:
+    async def health_check() -> dict:
         """Returns 200 when the API is running."""
         return {"status": "healthy", "version": settings.APP_VERSION}
 

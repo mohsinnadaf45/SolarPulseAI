@@ -54,6 +54,15 @@ class Plant(Base):
     alerts: Mapped[list] = relationship(
         "AnomalyAlert", back_populates="plant", cascade="all, delete-orphan"
     )
+    maintenance_assessments: Mapped[list] = relationship(
+        "EquipmentMaintenanceAssessment", back_populates="plant", cascade="all, delete-orphan"
+    )
+    health_records: Mapped[list] = relationship(
+        "PlantHealthRecord", back_populates="plant", cascade="all, delete-orphan"
+    )
+    curtailment_records: Mapped[list] = relationship(
+        "CurtailmentRecord", back_populates="plant", cascade="all, delete-orphan"
+    )
 
 
 class PlantConfig(Base):

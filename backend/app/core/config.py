@@ -56,6 +56,27 @@ class Settings(BaseSettings):
     NWP_API_URL: str = ""
     NWP_API_KEY: str = ""
 
+    # ── Predictive Maintenance Configuration (Enhancement 4) ───────────────────
+    MAINTENANCE_THERMAL_WEIGHT: float = 0.25
+    MAINTENANCE_EFFICIENCY_WEIGHT: float = 0.25
+    MAINTENANCE_SHORTFALL_WEIGHT: float = 0.25
+    MAINTENANCE_ANOMALY_WEIGHT: float = 0.25
+    MAINTENANCE_CRITICAL_TEMP_C: float = 65.0
+    MAINTENANCE_NOMINAL_EFFICIENCY: float = 0.96
+    MAINTENANCE_EVALUATION_WINDOW_HOURS: int = 24
+
+    # ── AI Plant Health Scoring Configuration (Enhancement 5) ──────────────────
+    HEALTH_WEIGHT_GENERATION: float = 0.30
+    HEALTH_WEIGHT_INVERTER: float = 0.20
+    HEALTH_WEIGHT_SOILING: float = 0.15
+    HEALTH_WEIGHT_ANOMALY: float = 0.20
+    HEALTH_WEIGHT_EQUIPMENT: float = 0.15
+
+    # ── Grid Curtailment Configuration (Enhancement 6) ────────────────────────
+    CURTAILMENT_DEFAULT_EXPORT_LIMIT_RATIO: float = 0.85
+    CURTAILMENT_RISK_MEDIUM_THRESHOLD_PCT: float = 5.0
+    CURTAILMENT_RISK_HIGH_THRESHOLD_PCT: float = 20.0
+
     @field_validator("JWT_SECRET_KEY")
     @classmethod
     def jwt_secret_must_not_be_default(cls, v: str) -> str:
